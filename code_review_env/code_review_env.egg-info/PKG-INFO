@@ -1,0 +1,13 @@
+Metadata-Version: 2.4
+Name: code-review-env
+Version: 0.1.0
+Summary: OpenEnv-compliant RL environment for AI code review
+Author: your-team-name
+License: MIT
+Requires-Python: >=3.9
+Requires-Dist: pydantic>=2.6.0
+Dynamic: author
+Dynamic: license
+Dynamic: requires-dist
+Dynamic: requires-python
+Dynamic: summary

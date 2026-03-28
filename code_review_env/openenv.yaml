@@ -1,0 +1,27 @@
+name: code-review-env
+version: "0.1.0"
+description: >
+  A real-world RL environment where an AI agent reviews Python code,
+  identifies bugs, and suggests fixes. Tasks from easy to hard.
+author: your-team-name
+license: MIT
+tags: [code-review, software-engineering, real-world, nlp]
+tasks:
+  - name: syntax_error_detection
+    difficulty: easy
+    description: Agent identifies and explains syntax errors.
+  - name: logic_bug_detection
+    difficulty: medium
+    description: Agent finds logical bugs causing wrong outputs.
+  - name: refactor_and_optimize
+    difficulty: hard
+    description: Agent detects inefficiency and suggests optimized fix.
+observation_space:
+  type: text
+  description: A Python code snippet with optional error context.
+action_space:
+  type: text
+  description: >
+    JSON with: bug_found (bool), bug_line (int|null),
+    explanation (str), fixed_code (str|null).
+reward_range: [0.0, 1.0]
