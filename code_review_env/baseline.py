@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Baseline inference script using the OpenAI Python client.
+"""Baseline inference script using the Google Gemini API.
 
 Environment variables:
-  OPENAI_API_KEY   (required)
-  OPENAI_BASE_URL  (optional, defaults to https://api.openai.com/v1)
-  OPENAI_MODEL     (optional, defaults to gpt-4o-mini)
+  GEMINI_API_KEY   (required)
+  GEMINI_MODEL     (optional, defaults to gemini-2.0-flash)
 """
 
 import json
 import os
 import sys
+import time
 
 from dotenv import load_dotenv
 
@@ -47,27 +47,35 @@ def build_user_prompt(obs) -> str:
 
 
 def main() -> None:
-    api_key = os.environ.get("OPENAI_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
-        print("ERROR: OPENAI_API_KEY environment variable is not set.")
-        print("Usage: OPENAI_API_KEY=sk-... python baseline.py")
+        print("ERROR: GEMINI_API_KEY environment variable is not set.")
+        print("Usage: GEMINI_API_KEY=... python baseline.py")
         sys.exit(1)
 
-    base_url = os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1")
-    model = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+    model_name = os.environ.get("GEMINI_MODEL", "gemini-2.0-flash")
 
-    from openai import OpenAI
+    import google.generativeai as genai
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=model_name,
+        system_instruction=SYSTEM_PROMPT,
+        generation_config=genai.GenerationConfig(temperature=0.0),
+    )
+
     env = CodeReviewEnv(max_steps=3)
 
     print("=" * 60)
-    print(f"  Baseline Inference — model: {model}")
+    print(f"  Baseline Inference — model: {model_name}")
     print("=" * 60)
 
     results: dict = {}
 
-    for task_name in TASKS:
+    for task_idx, task_name in enumerate(TASKS):
+        if task_idx > 0:
+            print("  (waiting 10s between tasks to avoid rate limits...)")
+            time.sleep(10)
         print(f"\n── {task_name} ──")
         obs = env.reset(task_name)
         best_score = 0.0
@@ -77,24 +85,43 @@ def main() -> None:
             user_prompt = build_user_prompt(obs)
 
             try:
-                response = client.chat.completions.create(
-                    model=model,
-                    temperature=0.0,
-                    messages=[
-                        {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                )
-                raw = response.choices[0].message.content.strip()
-                # Strip markdown fences if LLM wraps its output
-                if raw.startswith("```"):
-                    lines = raw.splitlines()
-                    lines = [l for l in lines if not l.startswith("```")]
-                    raw = "\n".join(lines)
+                # Retry logic for free-tier rate limits
+                raw = None
+                for attempt in range(3):
+                    try:
+                        response = model.generate_content(user_prompt)
+                        raw = response.text.strip()
+                        break
+                    except Exception as api_err:
+                        if attempt < 2:
+                            wait = 60 * (attempt + 1)
+                            print(f"  Step {step_idx + 1}: rate limit, retrying in {wait}s...")
+                            import time
+                            time.sleep(wait)
+                        else:
+                            raise api_err
+
+                # Strip markdown fences (```json ... ``` or ``` ... ```)
+                if "```" in raw:
+                    import re
+                    match = re.search(r"```(?:json)?\s*\n?(.*?)```", raw, re.DOTALL)
+                    if match:
+                        raw = match.group(1).strip()
+
+                # Try to extract JSON object if there's extra text
+                if not raw.startswith("{"):
+                    start = raw.find("{")
+                    end = raw.rfind("}") + 1
+                    if start != -1 and end > start:
+                        raw = raw[start:end]
 
                 action = env.parse_action(raw)
             except Exception as e:
                 print(f"  Step {step_idx + 1}: parse error — {e}")
+                try:
+                    print(f"  Raw response: {response.text[:200]}")
+                except Exception:
+                    pass
                 action = Action(
                     bug_found=False,
                     bug_line=None,
@@ -134,12 +161,12 @@ def main() -> None:
     mean_best = total_best / len(results) if results else 0.0
     print(f"  {'─' * 30} {'─' * 8}")
     print(f"  {'Overall mean-best':<30} {mean_best:>8.3f}")
-    print(f"  Model: {model}")
+    print(f"  Model: {model_name}")
     print(f"{'=' * 60}")
 
     # ── Save JSON report ──────────────────────────────────────────
     report = {
-        "model": model,
+        "model": model_name,
         "mean_best_score": round(mean_best, 3),
         "tasks": results,
     }
